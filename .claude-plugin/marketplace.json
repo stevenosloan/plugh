@@ -1,0 +1,12 @@
+{
+  "name": "plugh",
+  "description": "Steven's plugins. For now, one: a voice and tone kit.",
+  "owner": { "name": "Steven Sloan" },
+  "plugins": [
+    {
+      "name": "plugh",
+      "source": "./",
+      "description": "Write and review in a project's own voice: rule chunks routed per content type, with personas and mechanical checks."
+    }
+  ]
+}

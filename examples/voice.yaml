@@ -1,0 +1,64 @@
+# The router for a made-up project: tern, a small open-source command line tool
+# for syncing dotfiles. Copy this file and voice/ to your project's root and
+# make them yours.
+
+# Who's writing and who's reading. role and audience are the defaults; a type
+# can name its own.
+personas:
+  maintainer:
+    description: >
+      One of the people who builds tern. Knows every corner of it, which makes
+      it easy to forget what a newcomer doesn't know. Writes to save the reader
+      time, not to show off.
+  newcomer:
+    description: >
+      Someone who installed tern today, or is deciding whether to. Comfortable
+      in a terminal, new to tern's ideas. Wants something working in a few
+      minutes and the reason behind each step.
+  regular:
+    description: >
+      Someone who uses tern every week and knows what they're looking for.
+      Arrives from a search or a link, scans for the one flag or change they
+      need, and leaves.
+
+# Which persona to apply for the writer & reader. These are the defaults, any type can override it.
+role: maintainer
+audience: newcomer
+
+# The types of documents or jobs in a project, and how to handle them.
+types:
+  guide:
+    match: docs/guides/
+    always:
+      - voice-core
+      - punctuation
+      - guide
+    if_relevant:
+      - code-samples
+    budget: 1000 # words
+
+  reference:
+    match: docs/reference/
+    audience: regular
+    always:
+      - voice-core
+      - punctuation
+      - reference
+      - code-samples
+    budget: 1000
+
+  changelog:
+    match: CHANGELOG.md
+    audience: regular
+    always:
+      - voice-core
+      - changelog
+    budget: 600
+
+  # Not a file: a job.
+  release-note:
+    doc: the summary at the top of a GitHub release
+    always:
+      - voice-core
+      - changelog
+    budget: 600

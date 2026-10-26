@@ -1,0 +1,8 @@
+{
+  "name": "plugh",
+  "displayName": "plugh",
+  "version": "0.1.0",
+  "description": "Write and review in a project's own voice: rule chunks routed per content type, with personas and mechanical checks.",
+  "author": { "name": "Steven Sloan" },
+  "license": "MIT"
+}
