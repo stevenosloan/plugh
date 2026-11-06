@@ -6,7 +6,7 @@ description: Use when asked to review a draft for voice and tone in a project wi
 # Review a draft for voice
 
 1. Load context exactly as the `plugh:write` skill does, steps 1 and 2.
-2. If `go tool plugh check <file>` works, run it and list its findings first.
+2. If `plugh` is available, run `plugh check <file>` and list its findings first.
 3. Read the draft against the loaded chunks. For each issue, give:
    - the line or a short quote,
    - the chunk and rule it falls under (`punctuation: Em dashes are a spaced ---`),
