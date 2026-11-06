@@ -26,6 +26,9 @@ const usage = `usage:
   plugh version                  print this build's version
 `
 
+// stderr is where warnings and usage go. A var so tests can read it.
+var stderr io.Writer = os.Stderr
+
 // errFindings means a check found errors; they've already been printed.
 var errFindings = errors.New("found errors")
 
@@ -40,7 +43,7 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, usage)
+		fmt.Fprint(stderr, usage)
 		return errors.New("no command given")
 	}
 	cmd, args := args[0], args[1:]
@@ -58,6 +61,13 @@ func run(args []string, out io.Writer) error {
 		return err
 	}
 	kit, loadErr := voice.Load(os.DirFS(root))
+	// kit prints this itself. The rest warn on stderr, so it can't get mixed
+	// into the context or findings they print.
+	if kit != nil && cmd != "kit" {
+		if w := pinWarning(kit.Plugh, version); w != "" {
+			fmt.Fprintf(stderr, "plugh: warning: %s\n", w)
+		}
+	}
 
 	switch cmd {
 	case "kit":
@@ -87,7 +97,7 @@ func run(args []string, out io.Writer) error {
 		}
 		return checkCmd(kit, root, args, out)
 	default:
-		fmt.Fprint(os.Stderr, usage)
+		fmt.Fprint(stderr, usage)
 		return fmt.Errorf("unknown command %q", cmd)
 	}
 }

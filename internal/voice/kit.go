@@ -7,10 +7,10 @@ import (
 	"io/fs"
 	"maps"
 	"path"
-	"regexp"
 	"slices"
 	"strings"
 
+	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v3"
 )
 
@@ -180,15 +180,13 @@ func (k *Kit) Checks(t *Type) ([]*Check, error) {
 	return checks, nil
 }
 
-// semver is the shape of a pinned version: a tag, with an optional
-// pre-release or build suffix.
-var semver = regexp.MustCompile(`^v\d+\.\d+\.\d+([-+].+)?$`)
-
 // Validate reports every problem with the router: a malformed plugh pin,
 // missing chunks and personas, cycles, and types over their budget.
 func (k *Kit) Validate() error {
 	var errs []error
-	if k.Plugh != "" && !semver.MatchString(k.Plugh) {
+	// Canonical drops build metadata (+meta) and fills in a short v1.2, so
+	// only a full version Go can fetch comes back unchanged.
+	if k.Plugh != "" && semver.Canonical(k.Plugh) != k.Plugh {
 		errs = append(errs, fmt.Errorf("plugh is %q; want a version like v0.1.0", k.Plugh))
 	}
 	for _, name := range slices.Sorted(maps.Keys(k.Types)) {

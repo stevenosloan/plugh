@@ -116,3 +116,50 @@ func TestKitWarnsOnPinMismatch(t *testing.T) {
 		})
 	}
 }
+
+// withVersion runs the test as a build of plugh at v.
+func withVersion(t *testing.T, v string) {
+	old := version
+	version = v
+	t.Cleanup(func() { version = old })
+}
+
+func TestContextWarnsOnPinMismatch(t *testing.T) {
+	project(t, "Fine.\n") // examples/voice.yaml pins v0.2.0
+	withVersion(t, "v9.9.9")
+	var out, errOut strings.Builder
+	old := stderr
+	stderr = &errOut
+	t.Cleanup(func() { stderr = old })
+
+	if err := run([]string{"context", "guide"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errOut.String(), "plugh: warning: ") {
+		t.Errorf("stderr = %q, want a warning", errOut.String())
+	}
+	if strings.Contains(out.String(), "warning") {
+		t.Errorf("the warning got into the context:\n%s", out.String())
+	}
+}
+
+func TestKitWarnsEvenWhenInvalid(t *testing.T) {
+	dir := project(t, "")
+	router := filepath.Join(dir, "voice.yaml")
+	data, err := os.ReadFile(router)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, "  broken:\n    always: [no-such-chunk]\n"...)
+	if err := os.WriteFile(router, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withVersion(t, "v9.9.9")
+	var out strings.Builder
+	if err := run([]string{"kit"}, &out); err == nil {
+		t.Fatal("kit passed a router with a missing chunk")
+	}
+	if !strings.Contains(out.String(), "warning: ") {
+		t.Errorf("kit output = %q, want the warning ahead of the errors", out.String())
+	}
+}

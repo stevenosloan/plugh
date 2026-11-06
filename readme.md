@@ -88,7 +88,7 @@ types:
 
 ### Pinning a version
 
-`plugh: v1.0.1` says the project's voice was written for plugh 1.0.1. Any later release that semver calls compatible works with it: 1.0.2 and 1.4.0 do, 1.0.0 and 2.0.0 don't. Below 1.0, a minor release can break things, so `v0.2.0` works with 0.2.x releases only. `plugh kit` warns if the installed plugh is older than the pin or on a different line. When plugh isn't installed, the plugin's `bin/plugh` runs the pinned version itself.
+`plugh: v1.0.1` says the project's voice was written for plugh 1.0.1. Any later release that semver calls compatible works with it: 1.0.2 and 1.4.0 do, 1.0.0 and 2.0.0 don't. Below 1.0, a minor release can break things, so `v0.2.0` works with 0.2.x releases only. Every command warns on stderr if the plugh running is older than the pin or on a different line, and `plugh kit` warns in its output. When plugh isn't installed, the plugin's `bin/plugh` runs the pinned version itself.
 
 ### What `plugh kit` checks
 
@@ -133,7 +133,7 @@ Each rule in the body says the rule, **Why**, and **When unsure**. To change a r
 
    Set `plugh: <version>` in `voice.yaml` too. A Go project that wants plugh pinned in its own `go.mod` can run `go get -tool github.com/stevenosloan/plugh/cmd/plugh@<version>` instead.
 
-   Installing is optional while the plugin is on. The plugin's [bin/plugh](bin/plugh) is on Claude's PATH, and it runs the first plugh it finds: one on PATH, then the project's Go tool, then `go run github.com/stevenosloan/plugh/cmd/plugh@<version>` with the version `voice.yaml` pins, or `latest`. That last one needs Go 1.27 or later (or `GOTOOLCHAIN=auto`, which fetches it). So the skills just run `plugh`.
+   Installing is optional while the plugin is on. The plugin's [bin/plugh](bin/plugh) is on Claude's PATH, and it runs the first plugh it finds: the project's Go tool, so a pin in `go.mod` wins, then one on PATH, then `go run github.com/stevenosloan/plugh/cmd/plugh@<version>` with the version `voice.yaml` pins, or `latest`. Without a pin, `go run` looks up the latest release on every call, so install plugh or pin it. That last one needs Go 1.27 or later (or `GOTOOLCHAIN=auto`, which fetches it). So the skills just run `plugh`.
 
 ## The plugh tool
 
