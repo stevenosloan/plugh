@@ -113,8 +113,8 @@ func splitFrontMatter(src []byte) (meta, body []byte, err error) {
 	if !ok {
 		return nil, src, nil
 	}
-	if bytes.HasPrefix(rest, []byte("---\n")) {
-		return nil, rest[len("---\n"):], nil
+	if body, ok := bytes.CutPrefix(rest, []byte("---")); ok && (len(body) == 0 || body[0] == '\n') {
+		return nil, bytes.TrimPrefix(body, []byte("\n")), nil // empty, maybe at the end of the file
 	}
 	meta, body, ok = bytes.Cut(rest, []byte("\n---\n"))
 	if !ok {

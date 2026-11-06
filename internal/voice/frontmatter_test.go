@@ -12,6 +12,9 @@ func TestParseFrontMatter(t *testing.T) {
 		"---\r\nlayout: x\r\n---\r\nbody\r\n": "layout=x",
 		"---\nlayout: x\n---":                 "layout=x", // closed at the end of the file
 		"---\n---\nbody\n":                    "",
+		"---\n---":                            "", // empty, closed at the end of the file
+		"---\n---\n":                          "",
+		"---\n---more\n":                      "error: front matter has no closing",
 		"text\n---\nlayout: x\n---\n":         "", // not at the top
 		"---\nlayout: x\nbody\n":              "error: front matter has no closing",
 		"---\nlayout: [x\n---\n":              "error: front matter",

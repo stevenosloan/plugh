@@ -22,6 +22,9 @@ func kitCmd(kit *voice.Kit, loadErr error, out io.Writer) error {
 	if w := pinWarning(kit.Plugh, version); w != "" {
 		fmt.Fprintf(out, "warning: %s\n", w)
 	}
+	for _, w := range kit.Warnings() {
+		fmt.Fprintf(out, "warning: %s\n", w)
+	}
 	if err := errors.Join(loadErr, kit.Validate()); err != nil {
 		return err
 	}
@@ -85,6 +88,9 @@ func typeForContext(kit *voice.Kit, root, wd, arg string) (t *voice.Type, what, 
 	file := arg
 	if !filepath.IsAbs(file) {
 		file = filepath.Join(wd, file)
+	}
+	if fi, err := os.Stat(file); err == nil && fi.IsDir() {
+		return nil, "", "", fmt.Errorf("%s is a folder; name a file in it, or a type", arg)
 	}
 	var fm voice.FrontMatter
 	src, err := os.ReadFile(file)
@@ -157,11 +163,22 @@ func checkCmd(kit *voice.Kit, root string, paths []string, out io.Writer) error 
 		if err != nil {
 			return err
 		}
+		byPath, maybe := kit.Covers(rel)
+		if !maybe {
+			continue // not content any type covers, like a readme
+		}
 		src, err := os.ReadFile(file)
 		if err != nil {
 			return err
 		}
 		fm, err := voice.ParseFrontMatter(src)
+		if err != nil && !byPath {
+			// Only front matter could make it content, and it can't be read,
+			// so it may not be content at all, like a readme opening with a rule.
+			fmt.Fprintf(out, "%s: %v; not checked (warning)\n", file, err)
+			warns++
+			continue
+		}
 		var t *voice.Type
 		if err == nil {
 			t, err = kit.TypeFor(rel, fm)

@@ -73,9 +73,9 @@ types:
 | `role`, `audience` | Persona names that override the top-level ones for this type |
 | `budget` | The most words the type's context can run to: its `always` chunks plus the role and audience descriptions. `plugh kit` fails if it's over. It keeps the rules that load every time short enough to be followed. `0` or left out means no limit |
 
-When several types match a file, the most specific wins: the one with the most `front_matter` fields, then the longest path. So `docs/` and `docs/guides/` can both be types, and a front matter match beats a path-only one. Two types that tie are an error for that file; give one a longer path or another field. `plugh kit` reports two types with the same `match`.
+When several types match a file, the most specific wins: the one with the most `front_matter` fields, then the longest path. So `docs/` and `docs/guides/` can both be types, and a front matter match beats a path-only one. Two types that tie are an error for that file; give one a longer path or another field. `plugh kit` reports two types with the same `match`, and warns about two that could tie: the same path and as many `front_matter` fields.
 
-`plugh check` and `plugh context <file>` skip files that no type matches, like a README you don't want held to the guide. A file that doesn't exist yet has no front matter, so `plugh context` routes it by path and lists the front matter types it could be instead.
+`plugh check` and `plugh context <file>` skip files that no type matches, like a README you don't want held to the guide. `check` doesn't read a file that no type's path covers unless a type matches front matter anywhere. If that file's front matter can't be read, `check` warns and skips it, since it may not be content at all. Under a type's path, it's an error. A file that doesn't exist yet has no front matter, so `plugh context` routes it by path and lists the front matter types it could be instead.
 
 ### Personas
 
@@ -101,11 +101,11 @@ types:
 
 ### Pinning a version
 
-`plugh: v1.0.1` says the project's voice was written for plugh 1.0.1. Any later release that semver calls compatible works with it: 1.0.2 and 1.4.0 do, 1.0.0 and 2.0.0 don't. Below 1.0, a minor release can break things, so `v0.2.0` works with 0.2.x releases only. Every command warns on stderr if the plugh running is older than the pin or on a different line, and `plugh kit` warns in its output. plugh rejects keys it doesn't know, in `voice.yaml` and in chunks, so an older plugh fails on a key added after it. The warning says why. When plugh isn't installed, the plugin's `bin/plugh` runs the pinned version itself.
+`plugh: v1.0.1` says the project's voice was written for plugh 1.0.1. Any later release that semver calls compatible works with it: 1.0.2 and 1.4.0 do, 1.0.0 and 2.0.0 don't. Below 1.0, a minor release can break things, so `v0.2.0` works with 0.2.x releases only. Every command warns on stderr if the plugh running is older than the pin or on a different line, and `plugh kit` warns in its output. plugh rejects keys it doesn't know, in `voice.yaml` and in chunks, so an older plugh fails on a key added after it. It reads the pin first, so the warning still says why. When plugh isn't installed, the plugin's `bin/plugh` runs the pinned version itself.
 
 ### What `plugh kit` checks
 
-A key plugh doesn't know, in `voice.yaml` or a chunk, which is usually a typo. A `plugh` pin that isn't a version, a `match` map with neither field, two types with the same `match`, a chunk id that doesn't exist, a `depends_on` cycle, a type with an empty `always`, a role or audience that isn't in `personas`, and a type over its budget. It reports all of them at once, along with any chunk that doesn't load.
+A key plugh doesn't know, in `voice.yaml` or a chunk, which is usually a typo. A `plugh` pin that isn't a version, a `match` map with neither field, two types with the same `match` (and warns about two that could tie), a chunk id that doesn't exist, a `depends_on` cycle, a type with an empty `always`, a role or audience that isn't in `personas`, and a type over its budget. It reports all of them at once, along with any chunk that doesn't load.
 
 ## Chunks
 

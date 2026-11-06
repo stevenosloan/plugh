@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"golang.org/x/mod/semver"
+	"gopkg.in/yaml.v3"
 )
 
 // RouterFile is the router's name at a project's root.
@@ -56,15 +57,21 @@ type Type struct {
 }
 
 // Load reads project's voice.yaml and voice/*.md. As with LoadChunks, it
-// returns what it could load along with every problem.
+// returns what it could load along with every problem. A voice.yaml that
+// doesn't decode still gives a kit with its plugh pin, since a version
+// mismatch is the likeliest reason a key plugh doesn't know is there.
 func Load(project fs.FS) (*Kit, error) {
 	src, err := fs.ReadFile(project, RouterFile)
 	if err != nil {
 		return nil, err
 	}
+	var pin struct {
+		Plugh string `yaml:"plugh"`
+	}
+	_ = yaml.Unmarshal(src, &pin) // leniently, so other keys can't hide it
 	k := &Kit{}
 	if err := decodeStrict(src, k); err != nil {
-		return nil, fmt.Errorf("%s: %w", RouterFile, err)
+		return &Kit{Plugh: pin.Plugh}, fmt.Errorf("%s: %w", RouterFile, err)
 	}
 	for name, t := range k.Types {
 		t.Name = name
@@ -100,6 +107,25 @@ func (k *Kit) TypeFor(file string, fm FrontMatter) (*Type, error) {
 			file, strings.Join(tied, " and "))
 	}
 	return best, nil
+}
+
+// Covers says which types file, a slash-separated path relative to the
+// project root, could have before its front matter is read. byPath is
+// whether a type with a path covers it, which makes it content whatever its
+// front matter says; maybe is whether any type could, including one that
+// matches front matter anywhere.
+func (k *Kit) Covers(file string) (byPath, maybe bool) {
+	file = path.Clean(file)
+	for _, t := range k.Types {
+		if t.Match.IsZero() || !t.Match.fitsPath(file) {
+			continue
+		}
+		maybe = true
+		if t.Match.Path != "" {
+			return true, true
+		}
+	}
+	return false, maybe
 }
 
 // FrontMatterTypes returns the types with front matter in their match whose
@@ -212,16 +238,17 @@ func (k *Kit) Validate() error {
 	if k.Plugh != "" && semver.Canonical(k.Plugh) != k.Plugh {
 		errs = append(errs, fmt.Errorf("plugh is %q; want a version like v0.1.0", k.Plugh))
 	}
-	matches := map[string]string{} // Match.String to the type with it
-	for _, name := range slices.Sorted(maps.Keys(k.Types)) {
+	names := slices.Sorted(maps.Keys(k.Types))
+	for i, name := range names {
 		t := k.Types[name]
 		if t.Match.given && t.Match.IsZero() {
 			errs = append(errs, fmt.Errorf("type %s: match has neither path nor front_matter", name))
-		} else if m := t.Match.String(); m != "" {
-			if other, ok := matches[m]; ok {
-				errs = append(errs, fmt.Errorf("types %s and %s have the same match, %s", other, name, m))
+		} else if !t.Match.IsZero() {
+			for _, other := range names[:i] {
+				if k.Types[other].Match.equal(t.Match) {
+					errs = append(errs, fmt.Errorf("types %s and %s have the same match, %s", other, name, t.Match))
+				}
 			}
-			matches[m] = name
 		}
 		if len(t.Always) == 0 {
 			errs = append(errs, fmt.Errorf("type %s: always is empty", name))
@@ -250,4 +277,32 @@ func (k *Kit) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// Warnings reports what in the router isn't wrong yet but can be: two types
+// whose matches neither beats, so a file both match is an error at check
+// time. They have the same path and as many front_matter entries, but not
+// the same ones, or Validate reports them.
+func (k *Kit) Warnings() []string {
+	var warns []string
+	names := slices.Sorted(maps.Keys(k.Types))
+	for i, name := range names {
+		m := k.Types[name].Match
+		if m.IsZero() {
+			continue
+		}
+		for _, other := range names[:i] {
+			o := k.Types[other].Match
+			if o.IsZero() || o.equal(m) || o.Path != m.Path || len(o.FrontMatter) != len(m.FrontMatter) {
+				continue
+			}
+			where := "anywhere"
+			if m.Path != "" {
+				where = "under " + m.Path
+			}
+			warns = append(warns, fmt.Sprintf("types %s and %s can tie: a file %s whose front matter matches both is an error; give one a longer path or more front_matter",
+				other, name, where))
+		}
+	}
+	return warns
 }

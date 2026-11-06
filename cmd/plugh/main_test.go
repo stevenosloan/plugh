@@ -167,21 +167,98 @@ func TestKitWarnsEvenWhenInvalid(t *testing.T) {
 func TestCheckRoutesByFrontMatter(t *testing.T) {
 	// No path covers docs/v1.md, so only its front matter gets it checked.
 	dir := project(t, "")
-	if err := os.WriteFile(filepath.Join(dir, "docs", "v1.md"), []byte("---\nkind: release-note\n---\n\nSimply works now.\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "docs", "bad.md"), []byte("---\nkind: [x\n---\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	write(t, dir, "docs/v1.md", "---\nkind: release-note\n---\n\nSimply works now.\n")
 	var out strings.Builder
-	err := run([]string{"check"}, &out)
-	if !errors.Is(err, errFindings) {
-		t.Fatalf("run(check) = %v, want errFindings", err)
+	if err := run([]string{"check"}, &out); err != nil {
+		t.Fatalf("run(check) = %v, want no errors, just warnings:\n%s", err, out.String())
 	}
-	for _, want := range []string{"v1.md:5:1 minimizers:", "bad.md: front matter:"} {
+	if want := "v1.md:5:1 minimizers:"; !strings.Contains(out.String(), want) {
+		t.Errorf("output is missing %q:\n%s", want, out.String())
+	}
+}
+
+func TestCheckUnreadableFrontMatter(t *testing.T) {
+	// Only release-note, by front matter, could cover docs/bad.md, so front
+	// matter that can't be read may mean it isn't content: a warning. A
+	// file under a type's path is content either way: an error.
+	dir := project(t, "")
+	write(t, dir, "docs/bad.md", "---\nkind: [x\n---\n")
+	write(t, dir, "notes.md", "---\n\nA readme that opens with a rule.\n")
+	var out strings.Builder
+	if err := run([]string{"check"}, &out); err != nil {
+		t.Fatalf("run(check) = %v, want only warnings:\n%s", err, out.String())
+	}
+	for _, want := range []string{"bad.md: front matter:", "notes.md: front matter has no closing ---; not checked (warning)"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output is missing %q:\n%s", want, out.String())
 		}
+	}
+
+	write(t, dir, "docs/guides/bad.md", "---\nkind: [x\n---\n")
+	out.Reset()
+	if err := run([]string{"check"}, &out); !errors.Is(err, errFindings) {
+		t.Fatalf("run(check) = %v, want errFindings", err)
+	}
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.Contains(line, "guides/bad.md: front matter:") && strings.HasSuffix(line, "(warning)") {
+			t.Errorf("guides/bad.md is under guide's path, so its front matter is an error:\n%s", out.String())
+		}
+	}
+}
+
+func TestContextOnFolder(t *testing.T) {
+	project(t, "")
+	err := run([]string{"context", "guides"}, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "guides is a folder") {
+		t.Errorf("context on a folder = %v, want an error saying so", err)
+	}
+}
+
+func TestKitWarnsOnTies(t *testing.T) {
+	dir := project(t, "")
+	router := filepath.Join(dir, "voice.yaml")
+	data, err := os.ReadFile(router)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, "  tip:\n    match: {path: docs/guides/, front_matter: {draft: true}}\n    always: [voice-core]\n"...)
+	if err := os.WriteFile(router, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := run([]string{"kit"}, &out); err != nil {
+		t.Fatalf("kit = %v, want a pass with a warning", err)
+	}
+	if want := "warning: types tip and troubleshooting can tie: a file under docs/guides/"; !strings.Contains(out.String(), want) {
+		t.Errorf("kit output = %q, want %q", out.String(), want)
+	}
+}
+
+func TestKitWarnsWhenRouterDoesNotDecode(t *testing.T) {
+	// A newer key, as a newer plugh would write, still lets the pin warn.
+	dir := project(t, "")
+	if err := os.WriteFile(filepath.Join(dir, "voice.yaml"), []byte("plugh: v9.9.0\nfrom_the_future: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withVersion(t, "v0.3.0")
+	var out strings.Builder
+	err := run([]string{"kit"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "from_the_future") {
+		t.Errorf("kit = %v, want the unknown key reported", err)
+	}
+	if !strings.Contains(out.String(), "warning: voice.yaml is written for plugh v9.9.0") {
+		t.Errorf("kit output = %q, want the pin warning", out.String())
+	}
+}
+
+func write(t *testing.T, dir, name, data string) {
+	t.Helper()
+	p := filepath.Join(dir, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

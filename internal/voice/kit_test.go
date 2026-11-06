@@ -235,7 +235,10 @@ func TestMatchShapes(t *testing.T) {
 		"match: {path: docs/, front_matter: {layout: x}}": "",
 		"match: [docs/]":                        "match is a path, or a map",
 		"match: {paht: docs/}":                  `match has "paht"`,
-		"match: {front_matter: {tags: [a, b]}}": "single values",
+		"match: {front_matter: {tags: [a, b]}}": "match front_matter tags is a single value",
+		"match: {path: [docs/]}":                "match path is one path",
+		"match: {path: docs/, front_matter: x}": "match front_matter is a map",
+		"match: {path: docs/, front_matter: }":  "",
 	} {
 		_, err := testKit(t, "types:\n  x:\n    always: [core]\n    "+router+"\n")
 		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
@@ -263,6 +266,49 @@ types:
 	}
 	if strings.Contains(err.Error(), "type d") {
 		t.Errorf("Validate() = %v; d is fine", err)
+	}
+}
+
+func TestValidateComparesMatchesNotTheirStrings(t *testing.T) {
+	// Both read "front matter k: x, m: y", but match different files.
+	k, err := testKit(t, `
+types:
+  a: {match: {front_matter: {k: "x, m: y"}}, always: [core]}
+  b: {match: {front_matter: {k: x, m: y}}, always: [core]}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k.Validate(); err != nil {
+		t.Errorf("Validate() = %v, want no error", err)
+	}
+}
+
+func TestWarningsFindTies(t *testing.T) {
+	k, err := testKit(t, `
+types:
+  review:   {match: {path: content/, front_matter: {draft: true}}, always: [core]}
+  tutorial: {match: {path: content/, front_matter: {layout: tutorial}}, always: [core]}
+  deeper:   {match: {path: content/x/, front_matter: {layout: tutorial}}, always: [core]}
+  more:     {match: {path: content/, front_matter: {layout: tutorial, draft: true}}, always: [core]}
+  plain:    {match: content/, always: [core]}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := k.Warnings()
+	if len(got) != 1 || !strings.HasPrefix(got[0], "types review and tutorial can tie: a file under content/") {
+		t.Errorf("Warnings() = %q, want just review and tutorial", got)
+	}
+}
+
+func TestLoadKeepsThePinWhenTheRouterFails(t *testing.T) {
+	k, err := testKit(t, "plugh: v0.4.0\nmatch_v4: {}\n")
+	if err == nil {
+		t.Fatal("Load() passed an unknown key")
+	}
+	if k == nil || k.Plugh != "v0.4.0" {
+		t.Errorf("Load() = %+v, want a kit with the pin", k)
 	}
 }
 

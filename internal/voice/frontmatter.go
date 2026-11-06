@@ -63,18 +63,57 @@ func (m *Match) UnmarshalYAML(n *yaml.Node) error {
 		return n.Decode(&m.Path)
 	case yaml.MappingNode:
 		for i := 0; i < len(n.Content); i += 2 {
-			if k := n.Content[i].Value; k != "path" && k != "front_matter" {
-				return fmt.Errorf("line %d: match has %q; it takes path and front_matter", n.Content[i].Line, k)
+			key, val := n.Content[i], resolve(n.Content[i+1])
+			switch key.Value {
+			case "path":
+				if val.Kind != yaml.ScalarNode {
+					return fmt.Errorf("line %d: match path is one path, like docs/guides/", val.Line)
+				}
+				if err := val.Decode(&m.Path); err != nil {
+					return fmt.Errorf("line %d: match path: %w", val.Line, err)
+				}
+			case "front_matter":
+				if err := m.decodeFrontMatter(val); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("line %d: match has %q; it takes path and front_matter", key.Line, key.Value)
 			}
-		}
-		type plain Match // without this method, so Decode doesn't recurse
-		if err := n.Decode((*plain)(m)); err != nil {
-			return fmt.Errorf("line %d: match: front_matter values are single values, like layout: tutorial: %w", n.Line, err)
 		}
 		m.given = true
 		return nil
 	}
 	return fmt.Errorf("line %d: match is a path, or a map with path and front_matter", n.Line)
+}
+
+// decodeFrontMatter reads a match's front_matter, a map of keys to single
+// values. Left empty, it's none.
+func (m *Match) decodeFrontMatter(n *yaml.Node) error {
+	if n.ShortTag() == "!!null" {
+		return nil
+	}
+	if n.Kind != yaml.MappingNode {
+		return fmt.Errorf("line %d: match front_matter is a map of keys to values, like layout: tutorial", n.Line)
+	}
+	m.FrontMatter = map[string]string{}
+	for i := 0; i < len(n.Content); i += 2 {
+		key, val := n.Content[i], resolve(n.Content[i+1])
+		var v string
+		if val.Kind != yaml.ScalarNode || val.Decode(&v) != nil {
+			return fmt.Errorf("line %d: match front_matter %s is a single value, like %s: tutorial; it matches a list holding it",
+				val.Line, key.Value, key.Value)
+		}
+		m.FrontMatter[key.Value] = v
+	}
+	return nil
+}
+
+// resolve follows n if it's an alias.
+func resolve(n *yaml.Node) *yaml.Node {
+	if n.Kind == yaml.AliasNode {
+		return n.Alias
+	}
+	return n
 }
 
 // IsZero says whether m matches nothing, as for a job.
@@ -94,6 +133,11 @@ func (m Match) String() string {
 	default:
 		return m.Path + " with " + strings.Join(fm, ", ")
 	}
+}
+
+// equal says whether m and o match the same files.
+func (m Match) equal(o Match) bool {
+	return m.Path == o.Path && maps.Equal(m.FrontMatter, o.FrontMatter)
 }
 
 // fitsPath says whether file is under m's path; one with no path fits all.
