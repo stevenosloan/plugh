@@ -18,11 +18,12 @@ func kitCmd(kit *voice.Kit, loadErr error, out io.Writer) error {
 	if kit == nil {
 		return loadErr
 	}
-	if err := errors.Join(loadErr, kit.Validate()); err != nil {
-		return err
-	}
+	// Before validating: a version mismatch can be why it doesn't validate.
 	if w := pinWarning(kit.Plugh, version); w != "" {
 		fmt.Fprintf(out, "warning: %s\n", w)
+	}
+	if err := errors.Join(loadErr, kit.Validate()); err != nil {
+		return err
 	}
 	fmt.Fprintf(out, "ok: %d types, %d chunks\n", len(kit.Types), len(kit.Chunks))
 	return nil

@@ -21,6 +21,8 @@ func TestPinWarning(t *testing.T) {
 		{"v2.0.0", "v1.9.0", "install a v2.x"},
 		{"v0.2.0", "v0.2.5", ""},
 		{"v0.2.0", "v0.2.1-0.20261026185959-7fe5cecb1213+dirty", ""}, // a checkout after v0.2.0
+		{"v0.2.0", "v0.1.1-0.20261026185959-7fe5cecb1213", ""},       // a checkout before it's tagged
+		{"latest", "v0.2.0", ""},                                     // malformed; Validate says so
 		{"v0.2.0", "v0.3.0", "install a v0.2.x"},
 		{"v0.2.0", "v0.1.9", "install a v0.2.x"},
 	} {

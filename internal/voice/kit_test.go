@@ -161,7 +161,10 @@ func ids(chunks []*Chunk) string {
 }
 
 func TestValidatePlughPin(t *testing.T) {
-	for pin, ok := range map[string]bool{"": true, "v0.1.0": true, "v1.2.3-rc.1": true, "1.0": false, "latest": false} {
+	for pin, ok := range map[string]bool{
+		"": true, "v0.1.0": true, "v1.2.3-rc.1": true,
+		"1.0": false, "latest": false, "v1.2": false, "v01.2.3": false, "v1.2.3+build1": false,
+	} {
 		k, err := testKit(t, "plugh: \""+pin+"\"\ntypes:\n  job: {always: [core]}\n")
 		if err != nil {
 			t.Fatal(err)

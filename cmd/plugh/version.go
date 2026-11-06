@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"runtime/debug"
 
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 
 	"github.com/stevenosloan/plugh/internal/voice"
@@ -29,9 +30,15 @@ func buildVersion() string {
 // project needs: any later release on the same compatible line will do. That
 // line is the major version, or the minor below v1, where minor releases can
 // break things.
+//
+// A pseudo-version, from a build of a checkout, gets no warning: it's named
+// after the last tag before it, so it says little about what it can read.
 func pinWarning(pin, have string) string {
-	if pin == "" || !semver.IsValid(have) {
-		return "" // no pin, or a build that can't say what it is
+	if !semver.IsValid(pin) {
+		return "" // no pin, or a malformed one, which Validate reports
+	}
+	if !semver.IsValid(have) || module.IsPseudoVersion(have) {
+		return "" // a build that can't say what release it is
 	}
 	if line(have) != line(pin) {
 		return fmt.Sprintf("%s is written for plugh %s, and this is %s, which may read it differently; install a %s.x release",
