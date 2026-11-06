@@ -21,6 +21,9 @@ func kitCmd(kit *voice.Kit, loadErr error, out io.Writer) error {
 	if err := errors.Join(loadErr, kit.Validate()); err != nil {
 		return err
 	}
+	if w := pinWarning(kit.Plugh, version); w != "" {
+		fmt.Fprintf(out, "warning: %s\n", w)
+	}
 	fmt.Fprintf(out, "ok: %d types, %d chunks\n", len(kit.Types), len(kit.Chunks))
 	return nil
 }

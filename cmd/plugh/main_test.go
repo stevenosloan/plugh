@@ -79,7 +79,40 @@ func TestKit(t *testing.T) {
 	if err := run([]string{"kit"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out.String(), "ok: 4 types") {
+	if !strings.Contains(out.String(), "ok: 4 types") {
 		t.Errorf("kit output = %q", out.String())
+	}
+}
+
+func TestVersion(t *testing.T) {
+	t.Chdir(t.TempDir()) // no voice.yaml anywhere it looks
+	var out strings.Builder
+	if err := run([]string{"version"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out.String(), "plugh ") {
+		t.Errorf("version output = %q", out.String())
+	}
+}
+
+func TestKitWarnsOnPinMismatch(t *testing.T) {
+	project(t, "") // examples/voice.yaml pins v0.2.0
+	for v, warn := range map[string]bool{"v9.9.9": true, "v0.2.0": false, "v0.2.3": false, devel: false} {
+		t.Run(v, func(t *testing.T) {
+			old := version
+			version = v
+			t.Cleanup(func() { version = old })
+			var out strings.Builder
+			if err := run([]string{"kit"}, &out); err != nil {
+				t.Fatal(err)
+			}
+			got := strings.Contains(out.String(), "warning: ")
+			if got != warn {
+				t.Errorf("version %s: warned = %v, want %v:\n%s", v, got, warn, out.String())
+			}
+			if !strings.Contains(out.String(), "ok: 4 types") {
+				t.Errorf("kit output = %q", out.String())
+			}
+		})
 	}
 }
