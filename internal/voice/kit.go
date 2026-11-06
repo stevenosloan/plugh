@@ -43,10 +43,11 @@ type Persona struct {
 func (p *Persona) Words() int { return len(strings.Fields(p.Description)) }
 
 // A Type is one kind of content, like blog posts, or a job, like writing a
-// description. Match is a path prefix; a job has none.
+// description. Match says which files it covers; a job has none, though a
+// type can be both, so a job and its files share chunks.
 type Type struct {
 	Name       string   `yaml:"-"`
-	Match      string   `yaml:"match"`
+	Match      Match    `yaml:"match"`
 	Doc        string   `yaml:"doc"`
 	Always     []string `yaml:"always"`
 	IfRelevant []string `yaml:"if_relevant"`
@@ -56,15 +57,21 @@ type Type struct {
 }
 
 // Load reads project's voice.yaml and voice/*.md. As with LoadChunks, it
-// returns what it could load along with every problem.
+// returns what it could load along with every problem. A voice.yaml that
+// doesn't decode still gives a kit with its plugh pin, since a version
+// mismatch is the likeliest reason a key plugh doesn't know is there.
 func Load(project fs.FS) (*Kit, error) {
 	src, err := fs.ReadFile(project, RouterFile)
 	if err != nil {
 		return nil, err
 	}
+	var pin struct {
+		Plugh string `yaml:"plugh"`
+	}
+	_ = yaml.Unmarshal(src, &pin) // leniently, so other keys can't hide it
 	k := &Kit{}
-	if err := yaml.Unmarshal(src, k); err != nil {
-		return nil, fmt.Errorf("%s: %w", RouterFile, err)
+	if err := decodeStrict(src, k); err != nil {
+		return &Kit{Plugh: pin.Plugh}, fmt.Errorf("%s: %w", RouterFile, err)
 	}
 	for name, t := range k.Types {
 		t.Name = name
@@ -77,20 +84,62 @@ func Load(project fs.FS) (*Kit, error) {
 	return k, err
 }
 
-// TypeFor returns the type whose Match is the longest prefix of file, a
-// slash-separated path relative to the project root.
-func (k *Kit) TypeFor(file string) (*Type, bool) {
+// TypeFor returns the type that covers file, a slash-separated path
+// relative to the project root, with front matter fm. Of the types that
+// match, the one with the most front matter entries wins, then the longest
+// path. It returns nil if none match, and an error if two tie.
+func (k *Kit) TypeFor(file string, fm FrontMatter) (*Type, error) {
 	file = path.Clean(file)
 	var best *Type
-	for _, t := range k.Types {
-		if t.Match == "" || !strings.HasPrefix(file, t.Match) {
-			continue
-		}
-		if best == nil || len(t.Match) > len(best.Match) {
-			best = t
+	var tied []string
+	for _, name := range slices.Sorted(maps.Keys(k.Types)) {
+		t := k.Types[name]
+		switch {
+		case !t.Match.matches(file, fm):
+		case best == nil || t.Match.beats(best.Match):
+			best, tied = t, []string{name}
+		case !best.Match.beats(t.Match):
+			tied = append(tied, name)
 		}
 	}
-	return best, best != nil
+	if len(tied) > 1 {
+		return nil, fmt.Errorf("%s matches types %s equally; give one a longer path or more front_matter",
+			file, strings.Join(tied, " and "))
+	}
+	return best, nil
+}
+
+// Covers says which types file, a slash-separated path relative to the
+// project root, could have before its front matter is read. byPath is
+// whether a type with a path covers it, which makes it content whatever its
+// front matter says; maybe is whether any type could, including one that
+// matches front matter anywhere.
+func (k *Kit) Covers(file string) (byPath, maybe bool) {
+	file = path.Clean(file)
+	for _, t := range k.Types {
+		if t.Match.IsZero() || !t.Match.fitsPath(file) {
+			continue
+		}
+		maybe = true
+		if t.Match.Path != "" {
+			return true, true
+		}
+	}
+	return false, maybe
+}
+
+// FrontMatterTypes returns the types with front matter in their match whose
+// path file is under, for a file that doesn't exist yet: which one it gets
+// depends on what front matter it's written with.
+func (k *Kit) FrontMatterTypes(file string) []*Type {
+	file = path.Clean(file)
+	var types []*Type
+	for _, name := range slices.Sorted(maps.Keys(k.Types)) {
+		if t := k.Types[name]; len(t.Match.FrontMatter) > 0 && t.Match.fitsPath(file) {
+			types = append(types, t)
+		}
+	}
+	return types
 }
 
 // Resolve returns the chunks t always loads, each after the chunks it depends
@@ -181,7 +230,7 @@ func (k *Kit) Checks(t *Type) ([]*Check, error) {
 }
 
 // Validate reports every problem with the router: a malformed plugh pin,
-// missing chunks and personas, cycles, and types over their budget.
+// empty or duplicate matches, missing chunks and personas, cycles, and types over their budget.
 func (k *Kit) Validate() error {
 	var errs []error
 	// Canonical drops build metadata (+meta) and fills in a short v1.2, so
@@ -189,8 +238,18 @@ func (k *Kit) Validate() error {
 	if k.Plugh != "" && semver.Canonical(k.Plugh) != k.Plugh {
 		errs = append(errs, fmt.Errorf("plugh is %q; want a version like v0.1.0", k.Plugh))
 	}
-	for _, name := range slices.Sorted(maps.Keys(k.Types)) {
+	names := slices.Sorted(maps.Keys(k.Types))
+	for i, name := range names {
 		t := k.Types[name]
+		if t.Match.given && t.Match.IsZero() {
+			errs = append(errs, fmt.Errorf("type %s: match has neither path nor front_matter", name))
+		} else if !t.Match.IsZero() {
+			for _, other := range names[:i] {
+				if k.Types[other].Match.equal(t.Match) {
+					errs = append(errs, fmt.Errorf("types %s and %s have the same match, %s", other, name, t.Match))
+				}
+			}
+		}
 		if len(t.Always) == 0 {
 			errs = append(errs, fmt.Errorf("type %s: always is empty", name))
 		}
@@ -218,4 +277,32 @@ func (k *Kit) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// Warnings reports what in the router isn't wrong yet but can be: two types
+// whose matches neither beats, so a file both match is an error at check
+// time. They have the same path and as many front_matter entries, but not
+// the same ones, or Validate reports them.
+func (k *Kit) Warnings() []string {
+	var warns []string
+	names := slices.Sorted(maps.Keys(k.Types))
+	for i, name := range names {
+		m := k.Types[name].Match
+		if m.IsZero() {
+			continue
+		}
+		for _, other := range names[:i] {
+			o := k.Types[other].Match
+			if o.IsZero() || o.equal(m) || o.Path != m.Path || len(o.FrontMatter) != len(m.FrontMatter) {
+				continue
+			}
+			where := "anywhere"
+			if m.Path != "" {
+				where = "under " + m.Path
+			}
+			warns = append(warns, fmt.Sprintf("types %s and %s can tie: a file %s whose front matter matches both is an error; give one a longer path or more front_matter",
+				other, name, where))
+		}
+	}
+	return warns
 }

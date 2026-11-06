@@ -39,7 +39,7 @@ go.mod               github.com/stevenosloan/plugh
 
 ### Types
 
-A type is either a kind of content, found by its path, or a job that isn't a file of its own, like writing a release note:
+A type is either a kind of content, found by its path or its front matter, or a job that isn't a file of its own, like writing a release note. It can be both, so a job and its files share chunks:
 
 ```yaml
 types:
@@ -48,21 +48,34 @@ types:
     always: [voice-core, punctuation, guide]
     if_relevant: [code-samples]
     budget: 1000
+  troubleshooting:
+    match:
+      path: docs/guides/
+      front_matter:
+        kind: troubleshooting
+    always: [voice-core, punctuation, guide]
   release-note:
     doc: the summary at the top of a GitHub release
+    match:
+      front_matter:
+        kind: release-note
     always: [voice-core, changelog]
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `match` | A path prefix, relative to the project root, like `docs/guides/` or `CHANGELOG.md`. A file belongs to the type with the longest prefix it starts with, so `docs/` and `docs/guides/` can both be types. Leave it out for a job |
+| `match` | Which files are this type. Either a path prefix, relative to the project root, like `docs/guides/` or `CHANGELOG.md`, or a map with `path` and `front_matter`, as below. Leave it out for a job |
+| `match.path` | A path prefix. Optional when there's `front_matter`: then any path will do |
+| `match.front_matter` | Top-level front matter fields and the value each must have, like `layout: tutorial`. A file matches when it has every one. If the file's field is a list, it has to hold the value. Values compare as written, so `draft: true` matches `draft: true` |
 | `doc` | For a job: what it's for, in a few words. `plugh context` prints it in place of the path |
 | `always` | Chunk ids an agent reads every time, along with everything in their `depends_on`. Dependencies load first, and each chunk loads once. Checks come only from these chunks. Must not be empty |
 | `if_relevant` | Chunk ids an agent sees only as a one-line `summary`, and loads with `plugh chunk <id>` if it applies, like a chunk on code samples for a guide that has some. Their checks don't run |
 | `role`, `audience` | Persona names that override the top-level ones for this type |
 | `budget` | The most words the type's context can run to: its `always` chunks plus the role and audience descriptions. `plugh kit` fails if it's over. It keeps the rules that load every time short enough to be followed. `0` or left out means no limit |
 
-`plugh check` and `plugh context <file>` skip files that no type matches, like a README you don't want held to the guide.
+When several types match a file, the most specific wins: the one with the most `front_matter` fields, then the longest path. So `docs/` and `docs/guides/` can both be types, and a front matter match beats a path-only one. Two types that tie are an error for that file; give one a longer path or another field. `plugh kit` reports two types with the same `match`, and warns about two that could tie: the same path and as many `front_matter` fields.
+
+`plugh check` and `plugh context <file>` skip files that no type matches, like a README you don't want held to the guide. `check` doesn't read a file that no type's path covers unless a type matches front matter anywhere. If that file's front matter can't be read, `check` warns and skips it, since it may not be content at all. Under a type's path, it's an error. A file that doesn't exist yet has no front matter, so `plugh context` routes it by path and lists the front matter types it could be instead.
 
 ### Personas
 
@@ -88,11 +101,11 @@ types:
 
 ### Pinning a version
 
-`plugh: v1.0.1` says the project's voice was written for plugh 1.0.1. Any later release that semver calls compatible works with it: 1.0.2 and 1.4.0 do, 1.0.0 and 2.0.0 don't. Below 1.0, a minor release can break things, so `v0.2.0` works with 0.2.x releases only. Every command warns on stderr if the plugh running is older than the pin or on a different line, and `plugh kit` warns in its output. When plugh isn't installed, the plugin's `bin/plugh` runs the pinned version itself.
+`plugh: v1.0.1` says the project's voice was written for plugh 1.0.1. Any later release that semver calls compatible works with it: 1.0.2 and 1.4.0 do, 1.0.0 and 2.0.0 don't. Below 1.0, a minor release can break things, so `v0.2.0` works with 0.2.x releases only. Every command warns on stderr if the plugh running is older than the pin or on a different line, and `plugh kit` warns in its output. plugh rejects keys it doesn't know, in `voice.yaml` and in chunks, so an older plugh fails on a key added after it. It reads the pin first, so the warning still says why. When plugh isn't installed, the plugin's `bin/plugh` runs the pinned version itself.
 
 ### What `plugh kit` checks
 
-A `plugh` pin that isn't a version, a chunk id that doesn't exist, a `depends_on` cycle, a type with an empty `always`, a role or audience that isn't in `personas`, and a type over its budget. It reports all of them at once, along with any chunk that doesn't load.
+A key plugh doesn't know, in `voice.yaml` or a chunk, which is usually a typo. A `plugh` pin that isn't a version, a `match` map with neither field, two types with the same `match` (and warns about two that could tie), a chunk id that doesn't exist, a `depends_on` cycle, a type with an empty `always`, a role or audience that isn't in `personas`, and a type over its budget. It reports all of them at once, along with any chunk that doesn't load.
 
 ## Chunks
 

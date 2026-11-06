@@ -3,9 +3,9 @@
 # make them yours.
 
 # The plugh version this voice was written for. Later compatible releases
-# (v0.2.x here) work too; `plugh kit` warns about anything else. The skills
-# run this version when plugh isn't installed.
-plugh: v0.2.0
+# (v0.3.x here) work too; plugh warns about anything else. The skills run
+# this version when plugh isn't installed.
+plugh: v0.3.0
 
 # Who's writing and who's reading. role and audience are the defaults; a type
 # can name its own.
@@ -42,6 +42,20 @@ types:
       - code-samples
     budget: 1000 # words
 
+  # A guide whose front matter says it's for fixing something: same folder,
+  # but for a reader with a problem. Front matter beats a longer path.
+  troubleshooting:
+    match:
+      path: docs/guides/
+      front_matter:
+        kind: troubleshooting
+    audience: regular
+    always:
+      - voice-core
+      - punctuation
+      - guide
+    budget: 1000
+
   reference:
     match: docs/reference/
     audience: regular
@@ -60,9 +74,13 @@ types:
       - changelog
     budget: 600
 
-  # Not a file: a job.
+  # A job, like writing a release on GitHub, and also any file that says it's
+  # a release note, so both share one set of chunks.
   release-note:
     doc: the summary at the top of a GitHub release
+    match:
+      front_matter:
+        kind: release-note
     always:
       - voice-core
       - changelog
