@@ -1,0 +1,58 @@
+#!/bin/sh
+# plugh, as the plugin ships it: finds the real plugh and runs it. Claude Code
+# puts this folder on the Bash tool's PATH while the plugin is enabled, so the
+# skills and hooks can always run `plugh` whatever the project has.
+#
+# It tries, in order:
+#   1. another plugh on PATH, e.g. from go install
+#   2. the project's Go tool, from go get -tool
+#   3. go run at the version voice.yaml pins (plugh: vX.Y.Z), or latest
+#
+# Builtins only, so it works whatever else is on PATH.
+
+module=github.com/stevenosloan/plugh/cmd/plugh
+
+# 1. Another plugh on PATH. Skip this script, or it would run itself forever.
+IFS=:
+for d in $PATH; do
+	if [ -f "$d/plugh" ] && [ -x "$d/plugh" ] && ! [ "$d/plugh" -ef "$0" ]; then
+		unset IFS
+		exec "$d/plugh" "$@"
+	fi
+done
+unset IFS
+
+if ! command -v go >/dev/null 2>&1; then
+	echo "plugh: not installed, and there's no Go to run it with; see https://$module" >&2
+	exit 127
+fi
+
+# 2. The project's Go tool. -n prints the command without running it.
+if go tool -n plugh >/dev/null 2>&1; then
+	exec go tool plugh "$@"
+fi
+
+# 3. go run at the pinned version, from the nearest voice.yaml above here.
+version=latest
+dir=$PWD
+while :; do
+	if [ -f "$dir/voice.yaml" ]; then
+		while IFS= read -r line || [ -n "$line" ]; do
+			case $line in
+			plugh:*)
+				v=${line#plugh:}
+				v=${v%%#*}         # trailing comment
+				v=$(echo $v)       # surrounding space (echo is a builtin)
+				v=${v#[\"\']} v=${v%[\"\']}
+				[ -n "$v" ] && version=$v
+				break
+				;;
+			esac
+		done <"$dir/voice.yaml"
+		break
+	fi
+	[ -z "$dir" ] || [ "$dir" = / ] && break
+	dir=${dir%/*}
+done
+
+exec go run "$module@$version" "$@"

@@ -159,3 +159,15 @@ func ids(chunks []*Chunk) string {
 	}
 	return strings.Join(s, " ")
 }
+
+func TestValidatePlughPin(t *testing.T) {
+	for pin, ok := range map[string]bool{"": true, "v0.1.0": true, "v1.2.3-rc.1": true, "1.0": false, "latest": false} {
+		k, err := testKit(t, "plugh: \""+pin+"\"\ntypes:\n  job: {always: [core]}\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := k.Validate(); (err == nil) != ok {
+			t.Errorf("plugh: %q: Validate() = %v, want ok = %v", pin, err, ok)
+		}
+	}
+}

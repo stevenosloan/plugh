@@ -21,6 +21,9 @@ func kitCmd(kit *voice.Kit, loadErr error, out io.Writer) error {
 	if err := errors.Join(loadErr, kit.Validate()); err != nil {
 		return err
 	}
+	if w := pinWarning(kit.Plugh, version); w != "" {
+		fmt.Fprintf(out, "warning: %s\n", w)
+	}
 	fmt.Fprintf(out, "ok: %d types, %d chunks\n", len(kit.Types), len(kit.Chunks))
 	return nil
 }
@@ -62,7 +65,7 @@ func contextCmd(kit *voice.Kit, root, wd, arg string, out io.Writer) error {
 		fmt.Fprintf(out, "\n<!-- chunk %s, from %s -->\n%s", c.ID, c.Source, strings.TrimLeft(c.Body, "\n"))
 	}
 	if len(relevant) > 0 {
-		fmt.Fprintf(out, "\n## Load if relevant\n\nIf a summary applies to what you're writing, run `go tool plugh chunk <id>` and follow it too.\n\n")
+		fmt.Fprintf(out, "\n## Load if relevant\n\nIf a summary applies to what you're writing, run `plugh chunk <id>` and follow it too.\n\n")
 		for _, c := range relevant {
 			fmt.Fprintf(out, "- %s: %s\n", c.ID, c.Summary)
 		}

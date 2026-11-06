@@ -2,6 +2,11 @@
 # for syncing dotfiles. Copy this file and voice/ to your project's root and
 # make them yours.
 
+# The plugh version this voice was written for. Later compatible releases
+# (v0.2.x here) work too; `plugh kit` warns about anything else. The skills
+# run this version when plugh isn't installed.
+plugh: v0.2.0
+
 # Who's writing and who's reading. role and audience are the defaults; a type
 # can name its own.
 personas:

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"maps"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -21,7 +22,9 @@ const ChunkDir = "voice"
 
 // A Kit is everything one project's voice runs on: its router and its chunks. Role and Audience name
 // the personas every type writes as and for, unless a type names its own.
+// Plugh is the plugh version the project expects, like v0.1.0, if it pins one.
 type Kit struct {
+	Plugh    string              `yaml:"plugh"`
 	Personas map[string]*Persona `yaml:"personas"`
 	Role     string              `yaml:"role"`
 	Audience string              `yaml:"audience"`
@@ -177,10 +180,17 @@ func (k *Kit) Checks(t *Type) ([]*Check, error) {
 	return checks, nil
 }
 
-// Validate reports every problem with the router: missing chunks and
-// personas, cycles, and types over their budget.
+// semver is the shape of a pinned version: a tag, with an optional
+// pre-release or build suffix.
+var semver = regexp.MustCompile(`^v\d+\.\d+\.\d+([-+].+)?$`)
+
+// Validate reports every problem with the router: a malformed plugh pin,
+// missing chunks and personas, cycles, and types over their budget.
 func (k *Kit) Validate() error {
 	var errs []error
+	if k.Plugh != "" && !semver.MatchString(k.Plugh) {
+		errs = append(errs, fmt.Errorf("plugh is %q; want a version like v0.1.0", k.Plugh))
+	}
 	for _, name := range slices.Sorted(maps.Keys(k.Types)) {
 		t := k.Types[name]
 		if len(t.Always) == 0 {

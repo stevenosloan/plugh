@@ -5,6 +5,7 @@
 //	plugh check [path ...]         run the checks for each markdown file's type
 //	plugh chunk <id>               print one chunk, like an if_relevant one
 //	plugh kit                      check the router and chunks themselves
+//	plugh version                  print this build's version
 package main
 
 import (
@@ -22,6 +23,7 @@ const usage = `usage:
   plugh check [path ...]         check markdown files (default: the whole project)
   plugh chunk <id>               print one chunk, like an if_relevant one
   plugh kit                      check the router and chunks themselves
+  plugh version                  print this build's version
 `
 
 // errFindings means a check found errors; they've already been printed.
@@ -42,6 +44,10 @@ func run(args []string, out io.Writer) error {
 		return errors.New("no command given")
 	}
 	cmd, args := args[0], args[1:]
+	if cmd == "version" { // needs no project
+		fmt.Fprintf(out, "plugh %s\n", version)
+		return nil
+	}
 
 	wd, err := os.Getwd()
 	if err != nil {
