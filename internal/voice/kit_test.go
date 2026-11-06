@@ -37,13 +37,13 @@ types:
 		"content/recipes/x/index.md":         "content",
 		"./content/blog/x.md":                "blog",
 	} {
-		got, ok := k.TypeFor(file)
-		if !ok || got.Name != want {
-			t.Errorf("TypeFor(%q) = %v, want %s", file, got, want)
+		got, err := k.TypeFor(file, nil)
+		if err != nil || got == nil || got.Name != want {
+			t.Errorf("TypeFor(%q) = %v, %v; want %s", file, got, err, want)
 		}
 	}
-	if got, ok := k.TypeFor("readme.md"); ok {
-		t.Errorf("TypeFor(readme.md) = %s, want no type", got.Name)
+	if got, err := k.TypeFor("readme.md", nil); got != nil || err != nil {
+		t.Errorf("TypeFor(readme.md) = %v, %v; want no type", got, err)
 	}
 }
 
@@ -172,5 +172,118 @@ func TestValidatePlughPin(t *testing.T) {
 		if err := k.Validate(); (err == nil) != ok {
 			t.Errorf("plugh: %q: Validate() = %v, want ok = %v", pin, err, ok)
 		}
+	}
+}
+
+func TestTypeForFrontMatter(t *testing.T) {
+	k, err := testKit(t, `
+types:
+  content: {match: content/, always: [core]}
+  blog: {match: content/blog/, always: [blog]}
+  tutorial:
+    match: {path: content/, front_matter: {layout: tutorial}}
+    always: [core]
+  draft:
+    doc: a draft anywhere, which is a job too
+    match: {front_matter: {draft: true}}
+    always: [core]
+  go-tutorial:
+    match: {front_matter: {layout: tutorial, tags: go}}
+    always: [core]
+  review:
+    match: {path: content/, front_matter: {draft: true}}
+    always: [core]
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct{ file, fm, want string }{
+		{"content/blog/x.md", "", "blog"},
+		{"content/blog/x.md", "layout: post", "blog"},
+		{"content/blog/x.md", "layout: tutorial", "tutorial"},                     // front matter beats a longer path
+		{"content/blog/x.md", "layout: tutorial\ntags: [go, cli]", "go-tutorial"}, // a list holding the value
+		{"notes/x.md", "draft: true", "draft"},                                    // a bool, compared as written
+		{"content/x.md", "draft: true", "review"},                                 // same entries, longer path
+		{"notes/x.md", "draft: \"true\"", "draft"},
+		{"notes/x.md", "draft: false", ""},
+		{"notes/x.md", "layout: tutorial", ""}, // tutorial needs content/
+	} {
+		fm, err := ParseFrontMatter([]byte("---\n" + tt.fm + "\n---\nbody\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := k.TypeFor(tt.file, fm)
+		name := ""
+		if got != nil {
+			name = got.Name
+		}
+		if err != nil || name != tt.want {
+			t.Errorf("TypeFor(%q, %q) = %q, %v; want %q", tt.file, tt.fm, name, err, tt.want)
+		}
+	}
+
+	// review and tutorial each have one entry and the same path.
+	fm, _ := ParseFrontMatter([]byte("---\nlayout: tutorial\ndraft: true\n---\n"))
+	if _, err := k.TypeFor("content/x.md", fm); err == nil || !strings.Contains(err.Error(), "review and tutorial") {
+		t.Errorf("TypeFor on a tie = %v, want an error naming both", err)
+	}
+}
+
+func TestMatchShapes(t *testing.T) {
+	for router, want := range map[string]string{
+		"match: docs/": "",
+		"match: {path: docs/, front_matter: {layout: x}}": "",
+		"match: [docs/]":                        "match is a path, or a map",
+		"match: {paht: docs/}":                  `match has "paht"`,
+		"match: {front_matter: {tags: [a, b]}}": "single values",
+	} {
+		_, err := testKit(t, "types:\n  x:\n    always: [core]\n    "+router+"\n")
+		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
+			t.Errorf("%s: Load() = %v, want %q", router, err, want)
+		}
+	}
+}
+
+func TestValidateMatches(t *testing.T) {
+	k, err := testKit(t, `
+types:
+  a: {match: {path: docs/, front_matter: {layout: x}}, always: [core]}
+  b: {match: {path: docs/, front_matter: {layout: x}}, always: [core]}
+  c: {match: {}, always: [core]}
+  d: {match: docs/, always: [core]}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = k.Validate()
+	for _, want := range []string{"types a and b have the same match", "type c: match has neither"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Validate() = %v, want %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "type d") {
+		t.Errorf("Validate() = %v; d is fine", err)
+	}
+}
+
+func TestLoadRejectsUnknownKeys(t *testing.T) {
+	for router, want := range map[string]string{
+		"typse: {}\n":                        "field typse not found",
+		"types:\n  x: {alwasy: [core]}\n":    "field alwasy not found",
+		"personas:\n  p: {descripton: hi}\n": "field descripton not found",
+		"":                                   "",
+		"types:\n  x: {always: [core], doc: d}\n": "",
+	} {
+		_, err := testKit(t, router)
+		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
+			t.Errorf("%q: Load() = %v, want %q", router, err, want)
+		}
+	}
+
+	_, err := LoadChunks(fstest.MapFS{
+		"voice/x.md": {Data: []byte("---\nid: x\ndepend_on: [y]\n---\nbody\n")},
+	}, "voice")
+	if err == nil || !strings.Contains(err.Error(), "field depend_on not found") {
+		t.Errorf("LoadChunks() = %v, want the typo reported", err)
 	}
 }

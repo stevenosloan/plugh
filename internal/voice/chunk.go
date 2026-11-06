@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"path"
 	"regexp"
@@ -78,7 +79,7 @@ func loadChunk(fsys fs.FS, name string) (*Chunk, error) {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	c := &Chunk{Body: string(body), Source: name}
-	if err := yaml.Unmarshal(meta, c); err != nil {
+	if err := decodeStrict(meta, c); err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	if want := strings.TrimSuffix(path.Base(name), ".md"); c.ID != want {
@@ -117,7 +118,21 @@ func splitFrontMatter(src []byte) (meta, body []byte, err error) {
 	}
 	meta, body, ok = bytes.Cut(rest, []byte("\n---\n"))
 	if !ok {
-		return nil, nil, errors.New("front matter has no closing ---")
+		if meta, ok = bytes.CutSuffix(rest, []byte("\n---")); !ok { // closed at the end of the file
+			return nil, nil, errors.New("front matter has no closing ---")
+		}
 	}
 	return meta, body, nil
+}
+
+// decodeStrict decodes src into v, failing on any key v doesn't have, so a
+// typo is an error instead of a setting that quietly does nothing. An empty
+// src leaves v as it is.
+func decodeStrict(src []byte, v any) error {
+	dec := yaml.NewDecoder(bytes.NewReader(src))
+	dec.KnownFields(true)
+	if err := dec.Decode(v); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }

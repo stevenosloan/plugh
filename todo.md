@@ -11,7 +11,8 @@
 - [x] **Personas.** `personas` in `voice.yaml`, with a default `role` and `audience` that a type can override; `context` prints them and `kit` checks the names.
 - [x] **No built-in library.** Each project brings its own chunks; `examples/` is a whole made-up project.
 - [x] **`plugh context`, `plugh chunk` and `plugh check`.** `cmd/plugh`, with tests that run a whole fake project in a temp folder.
-- [x] **A standalone binary.** `go install` or `go run …@<version>`, so a project doesn't need plugh in its `go.mod`, or to be a Go module at all. `plugh version` reads `debug.ReadBuildInfo`; the plugin's `bin/plugh` finds the real one (PATH, then `go tool`, then `go run` at the `plugh:` pin in `voice.yaml`), so the skills just say `plugh`; and `plugh kit` warns when the installed binary is older or on another semver line (major, or minor below v1), using `golang.org/x/mod/semver`.
+- [x] **A standalone binary.** `go install` or `go run …@<version>`, so a project doesn't need plugh in its `go.mod`, or to be a Go module at all. `plugh version` reads `debug.ReadBuildInfo`; the plugin's `bin/plugh` finds the real one (the project's `go tool`, then PATH, then `go run` at the `plugh:` pin in `voice.yaml`), so the skills just say `plugh`; and every command warns when the installed binary is older or on another semver line (major, or minor below v1), using `golang.org/x/mod/semver`.
+- [x] **Front matter matches.** A type's `match` is a path, or a map with `path` and `front_matter` (`internal/voice/frontmatter.go`). The most front matter fields wins, then the longest path; a tie is an error for that file. `context` on a file that doesn't exist yet lists the front matter types it could be. A type can be a job and match files too.
 
 ## Next
 

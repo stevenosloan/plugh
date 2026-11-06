@@ -79,7 +79,7 @@ func TestKit(t *testing.T) {
 	if err := run([]string{"kit"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "ok: 4 types") {
+	if !strings.Contains(out.String(), "ok: 5 types") {
 		t.Errorf("kit output = %q", out.String())
 	}
 }
@@ -96,8 +96,8 @@ func TestVersion(t *testing.T) {
 }
 
 func TestKitWarnsOnPinMismatch(t *testing.T) {
-	project(t, "") // examples/voice.yaml pins v0.2.0
-	for v, warn := range map[string]bool{"v9.9.9": true, "v0.2.0": false, "v0.2.3": false, devel: false} {
+	project(t, "") // examples/voice.yaml pins v0.3.0
+	for v, warn := range map[string]bool{"v9.9.9": true, "v0.2.0": true, "v0.3.0": false, "v0.3.3": false, devel: false} {
 		t.Run(v, func(t *testing.T) {
 			old := version
 			version = v
@@ -110,7 +110,7 @@ func TestKitWarnsOnPinMismatch(t *testing.T) {
 			if got != warn {
 				t.Errorf("version %s: warned = %v, want %v:\n%s", v, got, warn, out.String())
 			}
-			if !strings.Contains(out.String(), "ok: 4 types") {
+			if !strings.Contains(out.String(), "ok: 5 types") {
 				t.Errorf("kit output = %q", out.String())
 			}
 		})
@@ -125,7 +125,7 @@ func withVersion(t *testing.T, v string) {
 }
 
 func TestContextWarnsOnPinMismatch(t *testing.T) {
-	project(t, "Fine.\n") // examples/voice.yaml pins v0.2.0
+	project(t, "Fine.\n") // examples/voice.yaml pins v0.3.0
 	withVersion(t, "v9.9.9")
 	var out, errOut strings.Builder
 	old := stderr
@@ -161,5 +161,77 @@ func TestKitWarnsEvenWhenInvalid(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "warning: ") {
 		t.Errorf("kit output = %q, want the warning ahead of the errors", out.String())
+	}
+}
+
+func TestCheckRoutesByFrontMatter(t *testing.T) {
+	// No path covers docs/v1.md, so only its front matter gets it checked.
+	dir := project(t, "")
+	if err := os.WriteFile(filepath.Join(dir, "docs", "v1.md"), []byte("---\nkind: release-note\n---\n\nSimply works now.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "bad.md"), []byte("---\nkind: [x\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	err := run([]string{"check"}, &out)
+	if !errors.Is(err, errFindings) {
+		t.Fatalf("run(check) = %v, want errFindings", err)
+	}
+	for _, want := range []string{"v1.md:5:1 minimizers:", "bad.md: front matter:"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output is missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestContextUsesFrontMatter(t *testing.T) {
+	project(t, "---\nkind: troubleshooting\n---\n\nFine.\n")
+	var out strings.Builder
+	if err := run([]string{"context", "guides/install.md"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if want := "# Voice for troubleshooting (docs/guides/ with kind: troubleshooting)"; !strings.HasPrefix(out.String(), want) {
+		t.Errorf("context starts %q, want %q", strings.SplitN(out.String(), "\n", 2)[0], want)
+	}
+	if !strings.Contains(out.String(), "## Writing for regular") {
+		t.Error("context should use troubleshooting's audience")
+	}
+}
+
+func TestContextSuggestsForNewFile(t *testing.T) {
+	project(t, "")
+	var out strings.Builder
+	if err := run([]string{"context", "guides/new.md"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"# Voice for guide (docs/guides/)",
+		"doesn't exist yet",
+		"- docs/guides/ with kind: troubleshooting: run `plugh context troubleshooting` instead",
+		"- front matter kind: release-note: run `plugh context release-note` instead",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("context is missing %q:\n%s", want, got)
+		}
+	}
+
+	// A job asked for by name says what it's for, not its match.
+	out.Reset()
+	if err := run([]string{"context", "release-note"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if want := "# Voice for release-note (the summary at the top of a GitHub release)"; !strings.HasPrefix(out.String(), want) {
+		t.Errorf("context starts %q, want %q", strings.SplitN(out.String(), "\n", 2)[0], want)
+	}
+}
+
+func TestContextNewFileOnlyFrontMatterFits(t *testing.T) {
+	project(t, "")
+	var out strings.Builder
+	err := run([]string{"context", "notes/new.md"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "matches no type by its path alone") || !strings.Contains(err.Error(), "plugh context release-note") {
+		t.Errorf("context = %v, want an error suggesting release-note", err)
 	}
 }

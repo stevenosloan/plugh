@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"golang.org/x/mod/semver"
-	"gopkg.in/yaml.v3"
 )
 
 // RouterFile is the router's name at a project's root.
@@ -43,10 +42,11 @@ type Persona struct {
 func (p *Persona) Words() int { return len(strings.Fields(p.Description)) }
 
 // A Type is one kind of content, like blog posts, or a job, like writing a
-// description. Match is a path prefix; a job has none.
+// description. Match says which files it covers; a job has none, though a
+// type can be both, so a job and its files share chunks.
 type Type struct {
 	Name       string   `yaml:"-"`
-	Match      string   `yaml:"match"`
+	Match      Match    `yaml:"match"`
 	Doc        string   `yaml:"doc"`
 	Always     []string `yaml:"always"`
 	IfRelevant []string `yaml:"if_relevant"`
@@ -63,7 +63,7 @@ func Load(project fs.FS) (*Kit, error) {
 		return nil, err
 	}
 	k := &Kit{}
-	if err := yaml.Unmarshal(src, k); err != nil {
+	if err := decodeStrict(src, k); err != nil {
 		return nil, fmt.Errorf("%s: %w", RouterFile, err)
 	}
 	for name, t := range k.Types {
@@ -77,20 +77,43 @@ func Load(project fs.FS) (*Kit, error) {
 	return k, err
 }
 
-// TypeFor returns the type whose Match is the longest prefix of file, a
-// slash-separated path relative to the project root.
-func (k *Kit) TypeFor(file string) (*Type, bool) {
+// TypeFor returns the type that covers file, a slash-separated path
+// relative to the project root, with front matter fm. Of the types that
+// match, the one with the most front matter entries wins, then the longest
+// path. It returns nil if none match, and an error if two tie.
+func (k *Kit) TypeFor(file string, fm FrontMatter) (*Type, error) {
 	file = path.Clean(file)
 	var best *Type
-	for _, t := range k.Types {
-		if t.Match == "" || !strings.HasPrefix(file, t.Match) {
-			continue
-		}
-		if best == nil || len(t.Match) > len(best.Match) {
-			best = t
+	var tied []string
+	for _, name := range slices.Sorted(maps.Keys(k.Types)) {
+		t := k.Types[name]
+		switch {
+		case !t.Match.matches(file, fm):
+		case best == nil || t.Match.beats(best.Match):
+			best, tied = t, []string{name}
+		case !best.Match.beats(t.Match):
+			tied = append(tied, name)
 		}
 	}
-	return best, best != nil
+	if len(tied) > 1 {
+		return nil, fmt.Errorf("%s matches types %s equally; give one a longer path or more front_matter",
+			file, strings.Join(tied, " and "))
+	}
+	return best, nil
+}
+
+// FrontMatterTypes returns the types with front matter in their match whose
+// path file is under, for a file that doesn't exist yet: which one it gets
+// depends on what front matter it's written with.
+func (k *Kit) FrontMatterTypes(file string) []*Type {
+	file = path.Clean(file)
+	var types []*Type
+	for _, name := range slices.Sorted(maps.Keys(k.Types)) {
+		if t := k.Types[name]; len(t.Match.FrontMatter) > 0 && t.Match.fitsPath(file) {
+			types = append(types, t)
+		}
+	}
+	return types
 }
 
 // Resolve returns the chunks t always loads, each after the chunks it depends
@@ -181,7 +204,7 @@ func (k *Kit) Checks(t *Type) ([]*Check, error) {
 }
 
 // Validate reports every problem with the router: a malformed plugh pin,
-// missing chunks and personas, cycles, and types over their budget.
+// empty or duplicate matches, missing chunks and personas, cycles, and types over their budget.
 func (k *Kit) Validate() error {
 	var errs []error
 	// Canonical drops build metadata (+meta) and fills in a short v1.2, so
@@ -189,8 +212,17 @@ func (k *Kit) Validate() error {
 	if k.Plugh != "" && semver.Canonical(k.Plugh) != k.Plugh {
 		errs = append(errs, fmt.Errorf("plugh is %q; want a version like v0.1.0", k.Plugh))
 	}
+	matches := map[string]string{} // Match.String to the type with it
 	for _, name := range slices.Sorted(maps.Keys(k.Types)) {
 		t := k.Types[name]
+		if t.Match.given && t.Match.IsZero() {
+			errs = append(errs, fmt.Errorf("type %s: match has neither path nor front_matter", name))
+		} else if m := t.Match.String(); m != "" {
+			if other, ok := matches[m]; ok {
+				errs = append(errs, fmt.Errorf("types %s and %s have the same match, %s", other, name, m))
+			}
+			matches[m] = name
+		}
 		if len(t.Always) == 0 {
 			errs = append(errs, fmt.Errorf("type %s: always is empty", name))
 		}
