@@ -164,4 +164,4 @@ plugh version                          # this build's version; works anywhere
 
 `check` prints `file:line:col id: message (chunk)` and exits 1 if there are errors; warnings don't fail it. It skips front matter, code (fenced, indented and inline) and URLs, and files no type matches.
 
-In this repo, `go test ./...` runs everything, including `plugh kit` against the example project. What's left is in [todo.md](todo.md).
+In this repo, `go test ./...` runs everything, including `plugh kit` against the example project, and CI runs it, with `gofmt` and `go vet`, on every pull request. What's left is in [todo.md](todo.md).
