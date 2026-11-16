@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"iter"
 	"maps"
 	"path"
 	"slices"
@@ -30,6 +31,8 @@ type Kit struct {
 	Audience string              `yaml:"audience"`
 	Types    map[string]*Type    `yaml:"types"`
 	Chunks   map[string]*Chunk   `yaml:"-"`
+
+	names []string // of Types, sorted once in Load, so Types can't change after
 }
 
 // A Persona is someone a piece is written as or for: who they are, what they
@@ -57,9 +60,11 @@ type Type struct {
 }
 
 // Load reads project's voice.yaml and voice/*.md. As with LoadChunks, it
-// returns what it could load along with every problem. A voice.yaml that
-// doesn't decode still gives a kit with its plugh pin, since a version
-// mismatch is the likeliest reason a key plugh doesn't know is there.
+// returns what it could load along with every problem. An unknown key or a
+// bad value in voice.yaml is one problem among them: the rest still loads,
+// so Validate can report everything else too. A voice.yaml that doesn't
+// parse gives an empty kit, with its plugh pin if that much can be read,
+// since a version mismatch can be why it doesn't.
 func Load(project fs.FS) (*Kit, error) {
 	src, err := fs.ReadFile(project, RouterFile)
 	if err != nil {
@@ -70,18 +75,50 @@ func Load(project fs.FS) (*Kit, error) {
 	}
 	_ = yaml.Unmarshal(src, &pin) // leniently, so other keys can't hide it
 	k := &Kit{}
+	var routerErr error
 	if err := decodeStrict(src, k); err != nil {
-		return &Kit{Plugh: pin.Plugh}, fmt.Errorf("%s: %w", RouterFile, err)
+		routerErr = fmt.Errorf("%s: %w", RouterFile, err)
+		if _, partial := err.(*yaml.TypeError); !partial {
+			return &Kit{Plugh: pin.Plugh}, routerErr
+		}
+		k.Plugh = cmp.Or(k.Plugh, pin.Plugh)
 	}
 	for name, t := range k.Types {
+		if t == nil { // written with no fields at all
+			t = &Type{}
+			k.Types[name] = t
+		}
 		t.Name = name
 	}
 	for name, p := range k.Personas {
+		if p == nil {
+			p = &Persona{}
+			k.Personas[name] = p
+		}
 		p.Name = name
 	}
+	k.names = slices.Sorted(maps.Keys(k.Types))
 
 	k.Chunks, err = LoadChunks(project, ChunkDir)
-	return k, err
+	return k, errors.Join(routerErr, err)
+}
+
+// matchPairs yields each pair of types that match files, the one whose name
+// sorts first first.
+func (k *Kit) matchPairs() iter.Seq2[*Type, *Type] {
+	return func(yield func(*Type, *Type) bool) {
+		for i, name := range k.names {
+			b := k.Types[name]
+			if b.Match.IsZero() {
+				continue
+			}
+			for _, other := range k.names[:i] {
+				if a := k.Types[other]; !a.Match.IsZero() && !yield(a, b) {
+					return
+				}
+			}
+		}
+	}
 }
 
 // TypeFor returns the type that covers file, a slash-separated path
@@ -92,7 +129,7 @@ func (k *Kit) TypeFor(file string, fm FrontMatter) (*Type, error) {
 	file = path.Clean(file)
 	var best *Type
 	var tied []string
-	for _, name := range slices.Sorted(maps.Keys(k.Types)) {
+	for _, name := range k.names {
 		t := k.Types[name]
 		switch {
 		case !t.Match.matches(file, fm):
@@ -134,7 +171,7 @@ func (k *Kit) Covers(file string) (byPath, maybe bool) {
 func (k *Kit) FrontMatterTypes(file string) []*Type {
 	file = path.Clean(file)
 	var types []*Type
-	for _, name := range slices.Sorted(maps.Keys(k.Types)) {
+	for _, name := range k.names {
 		if t := k.Types[name]; len(t.Match.FrontMatter) > 0 && t.Match.fitsPath(file) {
 			types = append(types, t)
 		}
@@ -238,17 +275,15 @@ func (k *Kit) Validate() error {
 	if k.Plugh != "" && semver.Canonical(k.Plugh) != k.Plugh {
 		errs = append(errs, fmt.Errorf("plugh is %q; want a version like v0.1.0", k.Plugh))
 	}
-	names := slices.Sorted(maps.Keys(k.Types))
-	for i, name := range names {
+	for a, b := range k.matchPairs() {
+		if a.Match.equal(b.Match) {
+			errs = append(errs, fmt.Errorf("types %s and %s have the same match, %s", a.Name, b.Name, b.Match))
+		}
+	}
+	for _, name := range k.names {
 		t := k.Types[name]
 		if t.Match.given && t.Match.IsZero() {
 			errs = append(errs, fmt.Errorf("type %s: match has neither path nor front_matter", name))
-		} else if !t.Match.IsZero() {
-			for _, other := range names[:i] {
-				if k.Types[other].Match.equal(t.Match) {
-					errs = append(errs, fmt.Errorf("types %s and %s have the same match, %s", other, name, t.Match))
-				}
-			}
 		}
 		if len(t.Always) == 0 {
 			errs = append(errs, fmt.Errorf("type %s: always is empty", name))
@@ -285,24 +320,17 @@ func (k *Kit) Validate() error {
 // the same ones, or Validate reports them.
 func (k *Kit) Warnings() []string {
 	var warns []string
-	names := slices.Sorted(maps.Keys(k.Types))
-	for i, name := range names {
-		m := k.Types[name].Match
-		if m.IsZero() {
+	for a, b := range k.matchPairs() {
+		m, o := b.Match, a.Match
+		if o.Path != m.Path || len(o.FrontMatter) != len(m.FrontMatter) || o.equal(m) {
 			continue
 		}
-		for _, other := range names[:i] {
-			o := k.Types[other].Match
-			if o.IsZero() || o.equal(m) || o.Path != m.Path || len(o.FrontMatter) != len(m.FrontMatter) {
-				continue
-			}
-			where := "anywhere"
-			if m.Path != "" {
-				where = "under " + m.Path
-			}
-			warns = append(warns, fmt.Sprintf("types %s and %s can tie: a file %s whose front matter matches both is an error; give one a longer path or more front_matter",
-				other, name, where))
+		where := "anywhere"
+		if m.Path != "" {
+			where = "under " + m.Path
 		}
+		warns = append(warns, fmt.Sprintf("types %s and %s can tie: a file %s whose front matter matches both is an error; give one a longer path or more front_matter",
+			a.Name, b.Name, where))
 	}
 	return warns
 }

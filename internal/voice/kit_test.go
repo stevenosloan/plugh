@@ -74,11 +74,11 @@ types:
   missing: {always: [nope]}
   long: {always: [blog], budget: 3}
   empty: {match: x/}
+  nobody: {always: [core], audience: ghost}
 `)
 	if err != nil {
 		t.Fatal(err)
 	}
-	k.Types["nobody"] = &Type{Name: "nobody", Always: []string{"core"}, Audience: "ghost"}
 	err = k.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want errors")
@@ -239,6 +239,11 @@ func TestMatchShapes(t *testing.T) {
 		"match: {path: [docs/]}":                "match path is one path",
 		"match: {path: docs/, front_matter: x}": "match front_matter is a map",
 		"match: {path: docs/, front_matter: }":  "",
+		"match: {path: docs/, path: other/}":    "match has path twice; the first is on line 4",
+		"match: {front_matter: {k: a, k: b}}":   "match front_matter has k twice",
+		"match: {front_matter: {draft: }}":      "match front_matter draft has no value",
+		"match: {front_matter: {draft: ~}}":     "match front_matter draft has no value",
+		"match: {front_matter: {draft: null}}":  "match front_matter draft has no value",
 	} {
 		_, err := testKit(t, "types:\n  x:\n    always: [core]\n    "+router+"\n")
 		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
@@ -331,5 +336,41 @@ func TestLoadRejectsUnknownKeys(t *testing.T) {
 	}, "voice")
 	if err == nil || !strings.Contains(err.Error(), "field depend_on not found") {
 		t.Errorf("LoadChunks() = %v, want the typo reported", err)
+	}
+}
+
+func TestLoadReportsMoreThanTheRouter(t *testing.T) {
+	// A typo in one type, and a bad match in another, don't hide a third
+	// type's missing chunk, or each other.
+	k, err := testKit(t, `
+types:
+  typo: {alwasy: [core]}
+  badmatch: {match: {paht: x/}, always: [core]}
+  missing: {match: docs/, always: [nope]}
+  bare:
+`)
+	for _, want := range []string{"field alwasy not found", `match has "paht"`} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Load() = %v, want %q", err, want)
+		}
+	}
+	if k == nil {
+		t.Fatal("Load() = nil kit, want what it could load")
+	}
+	err = k.Validate()
+	for _, want := range []string{`type missing: no chunk "nope"`, "type bare: always is empty"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Validate() = %v, want %q", err, want)
+		}
+	}
+}
+
+func TestLoadStopsAtBadYAML(t *testing.T) {
+	k, err := testKit(t, "plugh: v0.4.0\ntypes: [unclosed\n")
+	if err == nil {
+		t.Fatal("Load() passed YAML that doesn't parse")
+	}
+	if k == nil || k.Types != nil || k.Chunks != nil {
+		t.Errorf("Load() = %+v, want an empty kit", k)
 	}
 }

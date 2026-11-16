@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -138,16 +139,32 @@ func checkCmd(kit *voice.Kit, root string, paths []string, out io.Writer) error 
 	if err != nil {
 		return err
 	}
+	ignored := gitIgnored(root)
 	var files []string
 	for _, p := range paths {
 		err := filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			if d.IsDir() && path != p && strings.HasPrefix(d.Name(), ".") {
-				return filepath.SkipDir // .git and friends
+			if path == p { // named outright, so checked even if ignored
+				if !d.IsDir() && filepath.Ext(path) == ".md" {
+					files = append(files, path)
+				}
+				return nil
 			}
-			if !d.IsDir() && filepath.Ext(path) == ".md" {
+			rel, err := relToRoot(root, wd, path)
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				// .git and friends; voice/, whose chunks aren't content;
+				// and what git ignores, like node_modules.
+				if strings.HasPrefix(d.Name(), ".") || rel == voice.ChunkDir || ignored[rel+"/"] {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if filepath.Ext(path) == ".md" && !ignored[rel] {
 				files = append(files, path)
 			}
 			return nil
@@ -211,6 +228,25 @@ func checkCmd(kit *voice.Kit, root string, paths []string, out io.Writer) error 
 		return errFindings
 	}
 	return nil
+}
+
+// gitIgnored returns the files and folders (with a trailing /) that git
+// ignores under root, relative to it. Outside a git repo, or without git,
+// it's none.
+func gitIgnored(root string) map[string]bool {
+	cmd := exec.Command("git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
+	cmd.Dir = root
+	b, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	ignored := map[string]bool{}
+	for _, p := range strings.Split(string(b), "\x00") {
+		if p != "" {
+			ignored[p] = true
+		}
+	}
+	return ignored
 }
 
 func plural(n int, word string) string {

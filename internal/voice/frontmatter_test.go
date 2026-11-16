@@ -32,3 +32,24 @@ func TestParseFrontMatter(t *testing.T) {
 		}
 	}
 }
+
+func TestFrontMatterHasFollowsAliases(t *testing.T) {
+	fm, err := ParseFrontMatter([]byte("---\nbase: &b tutorial\nlayout: *b\ntags: [go, *b]\nalso: &l [x, y]\nlist: *l\n---\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		key, want string
+		has       bool
+	}{
+		{"layout", "tutorial", true},
+		{"tags", "tutorial", true},
+		{"tags", "go", true},
+		{"list", "y", true},
+		{"layout", "b", false},
+	} {
+		if got := fm.has(c.key, c.want); got != c.has {
+			t.Errorf("has(%s, %s) = %v, want %v", c.key, c.want, got, c.has)
+		}
+	}
+}

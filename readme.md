@@ -66,7 +66,7 @@ types:
 | --- | --- |
 | `match` | Which files are this type. Either a path prefix, relative to the project root, like `docs/guides/` or `CHANGELOG.md`, or a map with `path` and `front_matter`, as below. Leave it out for a job |
 | `match.path` | A path prefix. Optional when there's `front_matter`: then any path will do |
-| `match.front_matter` | Top-level front matter fields and the value each must have, like `layout: tutorial`. A file matches when it has every one. If the file's field is a list, it has to hold the value. Values compare as written, so `draft: true` matches `draft: true` |
+| `match.front_matter` | Top-level front matter fields and the value each must have, like `layout: tutorial`. A file matches when it has every one. If the file's field is a list, it has to hold the value. Values compare as written, so `draft: true` matches `draft: true`. Each needs a value: `draft:` with nothing after it is an error |
 | `doc` | For a job: what it's for, in a few words. `plugh context` prints it in place of the path |
 | `always` | Chunk ids an agent reads every time, along with everything in their `depends_on`. Dependencies load first, and each chunk loads once. Checks come only from these chunks. Must not be empty |
 | `if_relevant` | Chunk ids an agent sees only as a one-line `summary`, and loads with `plugh chunk <id>` if it applies, like a chunk on code samples for a guide that has some. Their checks don't run |
@@ -75,7 +75,7 @@ types:
 
 When several types match a file, the most specific wins: the one with the most `front_matter` fields, then the longest path. So `docs/` and `docs/guides/` can both be types, and a front matter match beats a path-only one. Two types that tie are an error for that file; give one a longer path or another field. `plugh kit` reports two types with the same `match`, and warns about two that could tie: the same path and as many `front_matter` fields.
 
-`plugh check` and `plugh context <file>` skip files that no type matches, like a README you don't want held to the guide. `check` doesn't read a file that no type's path covers unless a type matches front matter anywhere. If that file's front matter can't be read, `check` warns and skips it, since it may not be content at all. Under a type's path, it's an error. A file that doesn't exist yet has no front matter, so `plugh context` routes it by path and lists the front matter types it could be instead.
+`plugh check` and `plugh context <file>` skip files that no type matches, like a README you don't want held to the guide. `check` doesn't read a file that no type's path covers unless a type matches front matter anywhere. If that file's front matter can't be read, `check` warns and skips it, since it may not be content at all. Under any type's path, even one that also needs front matter, it's an error. Looking through folders, `check` skips `voice/` and anything git ignores; a file you name is checked either way. A file that doesn't exist yet has no front matter, so `plugh context` routes it by path and lists the front matter types it could be instead.
 
 ### Personas
 

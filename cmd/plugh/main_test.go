@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -310,5 +311,43 @@ func TestContextNewFileOnlyFrontMatterFits(t *testing.T) {
 	err := run([]string{"context", "notes/new.md"}, &out)
 	if err == nil || !strings.Contains(err.Error(), "matches no type by its path alone") || !strings.Contains(err.Error(), "plugh context release-note") {
 		t.Errorf("context = %v, want an error suggesting release-note", err)
+	}
+}
+
+func TestCheckSkipsWhatGitIgnores(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	// release-note matches front matter anywhere, so without git's help
+	// check would read node_modules too.
+	dir := project(t, "")
+	note := "---\nkind: release-note\n---\n\nSimply works now.\n"
+	write(t, dir, ".gitignore", "node_modules/\nignored.md\n")
+	write(t, dir, "node_modules/pkg/notes.md", note)
+	write(t, dir, "ignored.md", note)
+	write(t, dir, "kept.md", note)
+	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	var out strings.Builder
+	if err := run([]string{"check"}, &out); err != nil {
+		t.Fatalf("run(check) = %v:\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "kept.md:5:1 minimizers:") {
+		t.Errorf("didn't check kept.md:\n%s", out.String())
+	}
+	for _, skipped := range []string{"node_modules", "ignored.md"} {
+		if strings.Contains(out.String(), skipped) {
+			t.Errorf("checked %s, which git ignores:\n%s", skipped, out.String())
+		}
+	}
+
+	// Named outright, an ignored file is still checked.
+	out.Reset()
+	if err := run([]string{"check", "../ignored.md"}, &out); err != nil {
+		t.Fatalf("run(check ignored.md) = %v:\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "ignored.md:5:1 minimizers:") {
+		t.Errorf("didn't check ignored.md when named:\n%s", out.String())
 	}
 }

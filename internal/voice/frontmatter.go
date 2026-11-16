@@ -28,19 +28,21 @@ func ParseFrontMatter(src []byte) (FrontMatter, error) {
 }
 
 // has says whether key is want, or a list holding want. Values compare as
-// written, so draft: true has "true".
+// written, so draft: true has "true", and aliases count as what they name.
 func (fm FrontMatter) has(key, want string) bool {
-	n, ok := fm[key]
+	node, ok := fm[key]
 	if !ok {
 		return false
 	}
-	switch n.Kind {
+	is := func(n *yaml.Node) bool {
+		n = resolve(n)
+		return n.Kind == yaml.ScalarNode && n.Value == want
+	}
+	switch n := resolve(&node); n.Kind {
 	case yaml.ScalarNode:
-		return n.Value == want
+		return is(n)
 	case yaml.SequenceNode:
-		return slices.ContainsFunc(n.Content, func(e *yaml.Node) bool {
-			return e.Kind == yaml.ScalarNode && e.Value == want
-		})
+		return slices.ContainsFunc(n.Content, is)
 	}
 	return false
 }
@@ -57,33 +59,39 @@ type Match struct {
 	given bool // written as a map, which then can't be empty
 }
 
+// UnmarshalYAML reads a match. Its errors are yaml.TypeErrors, so decoding
+// carries on and reports the rest of voice.yaml's problems too.
 func (m *Match) UnmarshalYAML(n *yaml.Node) error {
 	switch n.Kind {
 	case yaml.ScalarNode:
 		return n.Decode(&m.Path)
 	case yaml.MappingNode:
+		seen := map[string]int{}
 		for i := 0; i < len(n.Content); i += 2 {
 			key, val := n.Content[i], resolve(n.Content[i+1])
+			if err := once(seen, "match", key); err != nil {
+				return err
+			}
 			switch key.Value {
 			case "path":
 				if val.Kind != yaml.ScalarNode {
-					return fmt.Errorf("line %d: match path is one path, like docs/guides/", val.Line)
+					return typeErr(val, "match path is one path, like docs/guides/")
 				}
 				if err := val.Decode(&m.Path); err != nil {
-					return fmt.Errorf("line %d: match path: %w", val.Line, err)
+					return typeErr(val, "match path: %v", err)
 				}
 			case "front_matter":
 				if err := m.decodeFrontMatter(val); err != nil {
 					return err
 				}
 			default:
-				return fmt.Errorf("line %d: match has %q; it takes path and front_matter", key.Line, key.Value)
+				return typeErr(key, "match has %q; it takes path and front_matter", key.Value)
 			}
 		}
 		m.given = true
 		return nil
 	}
-	return fmt.Errorf("line %d: match is a path, or a map with path and front_matter", n.Line)
+	return typeErr(n, "match is a path, or a map with path and front_matter")
 }
 
 // decodeFrontMatter reads a match's front_matter, a map of keys to single
@@ -93,19 +101,43 @@ func (m *Match) decodeFrontMatter(n *yaml.Node) error {
 		return nil
 	}
 	if n.Kind != yaml.MappingNode {
-		return fmt.Errorf("line %d: match front_matter is a map of keys to values, like layout: tutorial", n.Line)
+		return typeErr(n, "match front_matter is a map of keys to values, like layout: tutorial")
 	}
 	m.FrontMatter = map[string]string{}
+	seen := map[string]int{}
 	for i := 0; i < len(n.Content); i += 2 {
 		key, val := n.Content[i], resolve(n.Content[i+1])
+		if err := once(seen, "match front_matter", key); err != nil {
+			return err
+		}
+		// A file can write null as nothing, ~ or null, and has() compares
+		// as written, so a null here couldn't match them all.
+		if val.ShortTag() == "!!null" {
+			return typeErr(val, "match front_matter %s has no value; give it one, like %s: tutorial", key.Value, key.Value)
+		}
 		var v string
 		if val.Kind != yaml.ScalarNode || val.Decode(&v) != nil {
-			return fmt.Errorf("line %d: match front_matter %s is a single value, like %s: tutorial; it matches a list holding it",
-				val.Line, key.Value, key.Value)
+			return typeErr(val, "match front_matter %s is a single value, like %s: tutorial; it matches a list holding it",
+				key.Value, key.Value)
 		}
 		m.FrontMatter[key.Value] = v
 	}
 	return nil
+}
+
+// once records key in seen, and errors if it's already there. A map decoded
+// by hand skips yaml's own check for repeated keys.
+func once(seen map[string]int, where string, key *yaml.Node) error {
+	if first, ok := seen[key.Value]; ok {
+		return typeErr(key, "%s has %s twice; the first is on line %d", where, key.Value, first)
+	}
+	seen[key.Value] = key.Line
+	return nil
+}
+
+// typeErr is an error at n, in the form yaml collects to report together.
+func typeErr(n *yaml.Node, format string, args ...any) error {
+	return &yaml.TypeError{Errors: []string{fmt.Sprintf("line %d: ", n.Line) + fmt.Sprintf(format, args...)}}
 }
 
 // resolve follows n if it's an alias.
